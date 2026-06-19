@@ -3,6 +3,7 @@
 import logging
 import shlex
 import sys
+from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -73,9 +74,20 @@ Paths and files (IMPORTANT):
   /workspace/... path also works (it is the same place). Other absolute paths like
   /root/... or /home/... are NOT reachable by upload_url / download_url / read_text --
   put files under the workspace.
-- Small text (scripts, configs, short results): write_text / read_text. Large or binary
-  files IN: fetch_url(sandbox,url,dest) if already at a URL, else upload_url(sandbox,dest).
-  Files OUT to the user: download_url(sandbox,src).
+- Small text (scripts, configs, short results): write_text / read_text.
+- To bring a file FROM THE PHONE into the sandbox (e.g. a path like
+  /sdcard/Download/x.zip): (1) call upload_url(sandbox, dest) here to get an HTTPS
+  upload URL, then (2) call the LOCAL BRIDGE server's push_file(phone_path, that
+  upload_url) to send the bytes up. The sandbox CANNOT read phone paths itself: do NOT
+  pass file:///sdcard/... or a phone path to fetch_url/upload_url/download_url, and do
+  NOT give push_file a sandbox path as its url -- its url must be the upload_url from
+  step 1.
+- fetch_url(sandbox, url, dest) is ONLY for a file already hosted on a PUBLIC http(s)
+  URL. Never point it at a URL from this same server (e.g. a download_url you just
+  made) -- that loops back and hangs.
+- Files OUT to the user: download_url(sandbox, src) returns a link you give the user.
+  To save a sandbox file back to the PHONE, give that download_url to the bridge's
+  pull_file(download_url, phone_path).
 - Preinstalled: python3 (pypdf, pdfplumber, pandas, requests), git, curl, unzip.
 - Chinese/Unicode filenames inside ZIP archives are usually GBK-encoded; plain `unzip`
   will garble them. Extract with Python instead, decoding cp437->gb18030:
@@ -223,12 +235,44 @@ def download_url_tool(sandbox: str, src: str, ttl_seconds: int = 0) -> dict:
 
 @mcp.tool(name="fetch_url")
 def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
-    """Make the sandbox download a remote URL directly into its workspace at
-    `dest` (server-side, full bandwidth). Handy when the input file is already
-    reachable by a URL, avoiding a round-trip through the phone."""
+    """Make the sandbox download a PUBLIC http(s):// URL directly into its
+    workspace at `dest` (server-side, full bandwidth). Use this only for files
+    already hosted on the internet. To bring a file FROM THE PHONE into the
+    sandbox, do NOT use this -- call upload_url(sandbox, dest) and then the local
+    bridge's push_file(phone_path, that_upload_url)."""
     _tlog(f"TOOL fetch_url sandbox={sandbox} url={url} dest={dest}")
-    cmd = f"curl -fsSL -o {shlex.quote(dest)} {shlex.quote(url)} && echo saved {dest}"
-    return sandboxes.exec_command(sandbox, cmd, 600)
+    u = urlparse(url)
+    if u.scheme not in ("http", "https"):
+        return {
+            "error": (
+                f"fetch_url only accepts http(s):// URLs (got scheme "
+                f"{u.scheme or 'none'!r}). The sandbox cannot read phone paths like "
+                "file:///sdcard/... To bring a PHONE file in, call "
+                "upload_url(sandbox, dest) to get an upload URL, then use the local "
+                "bridge's push_file(phone_path, upload_url)."
+            )
+        }
+    # Refuse to fetch our own public endpoint: that makes the sandbox call back
+    # into this server through the tunnel, blocking the worker on a request that
+    # loops to itself -- it wedges the server. A phone file must go via upload_url
+    # + the bridge's push_file, never by fetching a /files URL from inside.
+    own = urlparse(config.PUBLIC_BASE_URL)
+    if u.netloc and own.netloc and u.netloc == own.netloc:
+        return {
+            "error": (
+                "Refusing to fetch this server's own URL from inside the sandbox "
+                "(it would loop back and hang). If this is a download_url you just "
+                "made, the file is already produced by the sandbox -- give that URL "
+                "to the user directly. To bring a PHONE file IN, use "
+                "upload_url(sandbox, dest) + the bridge's push_file(phone_path, url)."
+            )
+        }
+    # Bounded timeouts so a slow/stuck URL can never hang a worker indefinitely.
+    cmd = (
+        f"curl -fsSL --connect-timeout 20 --max-time 300 "
+        f"-o {shlex.quote(dest)} {shlex.quote(url)} && echo saved {dest}"
+    )
+    return sandboxes.exec_command(sandbox, cmd, 320)
 
 
 # --------------------------------------------------------------------------
