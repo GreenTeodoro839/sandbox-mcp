@@ -97,7 +97,7 @@ curl -s http://127.0.0.1:8000/healthz   # -> {"ok":true}
 
 ### 在 Miclaw 里添加（URL 型 MCP）
 
-直接粘贴下面的模板，把尖括号占位符换成你的实际值（具体字段名以 Miclaw 实际要求为准）：
+Miclaw 一次只能加一个 server。直接粘贴下面这条，把尖括号占位符换成你的实际值（具体字段名以 Miclaw 实际要求为准）：
 
 ```json
 {
@@ -107,19 +107,14 @@ curl -s http://127.0.0.1:8000/healthz   # -> {"ok":true}
       "headers": {
         "Authorization": "Bearer <SMCP_TOKEN>"
       }
-    },
-    "bridge": {
-      "url": "http://127.0.0.1:8765/mcp",
-      "headers": {
-        "Authorization": "Bearer <BRIDGE_TOKEN>"
-      }
     }
   }
 }
 ```
 
-- `sandbox` —— 本服务端，`<SMCP_TOKEN>` 用 `.env` 里的 `SMCP_TOKEN`，URL 换成你暴露出去的公网 HTTPS 地址。
-- `bridge` —— 可选的[手机端桥接器](https://github.com/GreenTeodoro839/sandbox-mcp-bridge)；没装就删掉这一段。`<BRIDGE_TOKEN>` 是装模块时自动生成、并在安装界面打印出来的那个 token。
+`<SMCP_TOKEN>` 用 `.env` 里的 `SMCP_TOKEN`，URL 换成你暴露出去的公网 HTTPS 地址。
+
+> 如果还装了[手机端桥接器](https://github.com/GreenTeodoro839/sandbox-mcp-bridge)，再单独添加它那一条（配置模板见该仓库 README）。
 
 ## 配置（环境变量）
 
