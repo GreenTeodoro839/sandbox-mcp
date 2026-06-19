@@ -30,15 +30,27 @@ be connected; that one ONLY moves files and CANNOT run commands, so never use it
 shell/command tasks.
 
 Running things:
-- exec(sandbox, command) runs a shell command and waits. The sandbox is created
-  automatically on first use and PERSISTS across turns -- reuse one short name (e.g.
-  "work") for related steps so files stay around. If a result has
+- exec(sandbox, command) runs a shell command and WAITS for it to finish. The sandbox
+  is created automatically on first use and PERSISTS across turns -- reuse one short
+  name (e.g. "work") for related steps so files stay around. If a result has
   sandbox_created=true, that sandbox did NOT exist (e.g. auto-removed after long
   idle) and was made fresh and EMPTY -- do not assume earlier files survived;
   recreate or re-upload what you need.
-- For anything longer than a few seconds (installing packages, processing many files),
-  use run_background(...) and poll get_job(...); plain exec will time out. To cancel a
-  running job (e.g. "stop / cancel that task", "停掉/取消那个任务"), call stop_job(job_id).
+- The connection to this server times out after about 30 seconds, so exec is ONLY for
+  quick commands that clearly finish well under 30s. For ANYTHING that may take longer
+  -- installing/compiling packages, downloading, converting or processing files, any
+  heavy Python/data work -- do NOT use exec. Use run_background(sandbox, command), which
+  returns a job_id immediately, then poll get_job(job_id) until it is finished. This is
+  the ONLY reliable way to run slow commands.
+- If a call ever fails with "socket timeout" / "Socket timeout has expired" / a
+  timed-out error, it just means the command was too slow for one synchronous request
+  (it may even still be running server-side). This is NOT a problem with your approach:
+  do NOT rewrite the task or switch language (e.g. C instead of Python) to "go faster".
+  Re-run the SAME command with run_background and poll get_job. Note: raising exec's
+  `timeout` argument does NOT help here -- that only changes the server-side command
+  limit, not the ~30s connection timeout. run_background is the fix.
+- To cancel a running job (e.g. "stop / cancel that task", "停掉/取消那个任务"), call
+  stop_job(job_id).
 
 Managing sandboxes:
 - To see what sandboxes exist (e.g. "list / show / which sandboxes", "查一下有哪些沙箱"),
@@ -121,8 +133,10 @@ def destroy_sandbox_tool(sandbox: str, delete_files: bool = False) -> dict:
 @mcp.tool(name="exec")
 def exec_tool(sandbox: str, command: str, timeout: int = 0) -> dict:
     """Run a shell command in the sandbox and wait for the result (auto-creates
-    the sandbox). Use this for quick commands. For anything that may run for more
-    than a few seconds, use run_background instead. timeout in seconds (0=default)."""
+    the sandbox). ONLY for quick commands that finish well under 30s -- the client
+    connection times out around 30 seconds. For anything slower (installs, compiling,
+    downloads, heavy processing) use run_background instead; raising `timeout` will NOT
+    avoid the connection timeout. timeout in seconds (0=default, server-side only)."""
     _tlog(f"TOOL exec sandbox={sandbox} cmd={command[:300]!r}")
     return sandboxes.exec_command(sandbox, command, timeout or None)
 
@@ -130,7 +144,9 @@ def exec_tool(sandbox: str, command: str, timeout: int = 0) -> dict:
 @mcp.tool(name="run_background")
 def run_background_tool(sandbox: str, command: str, timeout: int = 0) -> dict:
     """Start a long-running command in the background and return a job_id
-    immediately. Poll progress with get_job. timeout in seconds (0=default)."""
+    immediately, avoiding the ~30s client connection timeout. Use this for anything
+    slow (installs, compiling, downloads, heavy processing). Poll progress with
+    get_job. timeout in seconds (0=default)."""
     _tlog(f"TOOL run_background sandbox={sandbox} cmd={command[:300]!r}")
     return jobs.start(sandbox, command, timeout or None)
 
