@@ -49,6 +49,11 @@ Running things:
   Re-run the SAME command with run_background and poll get_job. Note: raising exec's
   `timeout` argument does NOT help here -- that only changes the server-side command
   limit, not the ~30s connection timeout. run_background is the fix.
+- When polling get_job: it already waits up to ~15s per call for the job to finish, so
+  to keep waiting just call it again at a steady pace -- do NOT fire it many times in a
+  rapid burst. Each result carries elapsed_seconds / log_bytes that advance over time, so
+  a still-running job looks different each poll (not a stuck loop). Stop polling once
+  status is "finished".
 - To cancel a running job (e.g. "stop / cancel that task", "停掉/取消那个任务"), call
   stop_job(job_id).
 
@@ -154,7 +159,9 @@ def run_background_tool(sandbox: str, command: str, timeout: int = 0) -> dict:
 @mcp.tool(name="get_job")
 def get_job_tool(job_id: str, tail_lines: int = 200) -> dict:
     """Get a background job's status (running/finished), exit code and the last
-    log lines."""
+    log lines. This call already waits up to ~15s for the job to finish before
+    returning, so just call it again to keep waiting -- no need to spin rapidly.
+    The result includes elapsed_seconds and log_bytes so progress is always visible."""
     return jobs.status(job_id, tail_lines)
 
 
