@@ -1,6 +1,12 @@
 # sandbox-mcp
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![image: GHCR](https://img.shields.io/badge/image-ghcr.io%2Fgreenteodoro839%2Fsandbox--mcp--base-2496ED?logo=docker&logoColor=white)](https://github.com/GreenTeodoro839/sandbox-mcp/pkgs/container/sandbox-mcp-base)
+[![build image](https://github.com/GreenTeodoro839/sandbox-mcp/actions/workflows/build-image.yml/badge.svg)](https://github.com/GreenTeodoro839/sandbox-mcp/actions/workflows/build-image.yml)
+
 给 AI 助手（如小米 Miclaw）用的**自托管 MCP 服务器**：在你自己的 Debian 机器上，用 Docker 容器作为沙箱，提供**命令执行、后台长任务、大文件传输、多沙箱自动管理**。
+
+> 📱 **手机端搭档**：[sandbox-mcp-bridge](https://github.com/GreenTeodoro839/sandbox-mcp-bridge) —— 跑在手机上的极简 MCP 模块，给没有 `curl` 的手机补上"本机文件收发"能力，配合本服务的签名 URL 一起用。
 
 > 状态：已在真实机器（Raspberry Pi / Debian + frp）上端到端跑通——握手、命令执行、后台任务、签名 URL 上传下载均验证过。你自己部署时仍可能要按 MCP SDK / docker-py 的版本细节小修小补。
 
