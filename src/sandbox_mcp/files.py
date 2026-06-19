@@ -17,26 +17,44 @@ from .util import smart_decode
 log = logging.getLogger("sandbox_mcp")
 
 
-def _safe_path(sandbox: str, rel: str) -> Path | None:
+class PathError(Exception):
+    """Raised when a user-supplied path is outside the sandbox workspace."""
+    pass
+
+
+def _safe_path(sandbox: str, rel: str) -> Path:
     """Resolve `rel` under the sandbox workspace, rejecting path traversal.
 
     Models routinely pass the in-container absolute path -- the workspace is
     bind-mounted at /workspace inside the sandbox, so `exec`/`ls` show files as
-    /workspace/foo.  Normalize any absolute path (and a leading /workspace prefix)
-    back to a path relative to the workspace root before resolving, so such a
-    dest uploads/downloads correctly instead of 400-ing as "bad path"."""
+    /workspace/foo.  Normalize any /workspace/... absolute path back to a path
+    relative to the workspace root before resolving.  Other absolute paths (/tmp,
+    /home, /root, ...) are REJECTED with a clear error, because the upload endpoint
+    can only write to the workspace -- writing to /workspace/tmp when the model
+    asked for /tmp means exec in /tmp won't find the file.
+
+    Returns the resolved Path on success.  Raises PathError on bad paths."""
     base = (config.DATA_DIR / sandbox / "workspace").resolve()
     pp = PurePosixPath(str(rel).strip())
     if pp.is_absolute():
         parts = pp.parts[1:]  # drop the leading "/"
         if parts and parts[0] == "workspace":
             parts = parts[1:]  # drop the container mount point
-        pp = PurePosixPath(*parts) if parts else PurePosixPath()
+            pp = PurePosixPath(*parts) if parts else PurePosixPath()
+        else:
+            # Absolute path NOT under /workspace -- reject with guidance.
+            name = PurePosixPath(rel).name or "filename"
+            raise PathError(
+                f"path {rel!r} is outside the sandbox workspace. The workspace is "
+                f"/workspace inside the container -- /tmp, /home, /root etc. are "
+                f"SEPARATE places. Use a relative name (e.g. {name!r}) or start "
+                f"with /workspace/ (e.g. /workspace/{name!r})."
+            )
     target = (base / pp).resolve()
     try:
         target.relative_to(base)
     except ValueError:
-        return None
+        raise PathError("path traversal rejected")
     return target
 
 
@@ -46,12 +64,13 @@ def _decode_name(name: str) -> str:
     return smart_decode(name.encode("utf-8", "surrogateescape"))
 
 
-def _resolve(sandbox: str, rel: str) -> Path | None:
+def _resolve(sandbox: str, rel: str) -> Path:
     """Like _safe_path, but if the exact file is missing, fall back to a sibling
     whose decoded name matches the request -- so a Chinese name shown by list_files
-    still maps back to its GBK-byte file on disk."""
+    still maps back to its GBK-byte file on disk.  Raises PathError from _safe_path
+    if the path is bad."""
     target = _safe_path(sandbox, rel)
-    if target is None or target.exists():
+    if target.exists():
         return target
     wanted = PurePosixPath(rel).name
     parent = target.parent
@@ -65,9 +84,10 @@ def _resolve(sandbox: str, rel: str) -> Path | None:
 # --- inline text tools (small files only) ---
 
 def list_dir(sandbox: str, rel: str = ".") -> dict:
-    target = _resolve(sandbox, rel)
-    if target is None:
-        return {"error": "bad path"}
+    try:
+        target = _resolve(sandbox, rel)
+    except PathError as e:
+        return {"error": str(e)}
     if not target.exists():
         return {"path": rel, "entries": []}
     entries = []
@@ -85,8 +105,11 @@ def list_dir(sandbox: str, rel: str = ".") -> dict:
 
 
 def read_text(sandbox: str, rel: str) -> dict:
-    target = _resolve(sandbox, rel)
-    if target is None or not target.is_file():
+    try:
+        target = _resolve(sandbox, rel)
+    except PathError as e:
+        return {"error": str(e)}
+    if not target.is_file():
         return {"error": "not found"}
     size = target.stat().st_size
     if size > config.READ_TEXT_MAX_BYTES:
@@ -97,9 +120,10 @@ def read_text(sandbox: str, rel: str) -> dict:
 
 
 def write_text(sandbox: str, rel: str, content: str) -> dict:
-    target = _safe_path(sandbox, rel)
-    if target is None:
-        return {"error": "bad path"}
+    try:
+        target = _safe_path(sandbox, rel)
+    except PathError as e:
+        return {"error": str(e)}
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     return {"path": rel, "size": target.stat().st_size}
@@ -111,9 +135,10 @@ async def download(request):
     payload = auth.verify(request.path_params["sig"])
     if not payload or payload.get("op") != "get":
         return PlainTextResponse("forbidden", status_code=403)
-    target = _resolve(payload["sb"], payload["p"])
-    if target is None:
-        return PlainTextResponse("bad path", status_code=400)
+    try:
+        target = _resolve(payload["sb"], payload["p"])
+    except PathError as e:
+        return PlainTextResponse(str(e), status_code=400)
     if not target.is_file():
         return PlainTextResponse("not found", status_code=404)
     log.info("HTTP download sandbox=%s path=%s size=%s", payload["sb"], payload["p"], target.stat().st_size)
@@ -124,9 +149,10 @@ async def upload(request):
     payload = auth.verify(request.path_params["sig"])
     if not payload or payload.get("op") != "put":
         return PlainTextResponse("forbidden", status_code=403)
-    target = _safe_path(payload["sb"], payload["p"])
-    if target is None:
-        return PlainTextResponse("bad path", status_code=400)
+    try:
+        target = _safe_path(payload["sb"], payload["p"])
+    except PathError as e:
+        return PlainTextResponse(str(e), status_code=400)
     target.parent.mkdir(parents=True, exist_ok=True)
     size = 0
     with open(target, "wb") as f:
@@ -154,9 +180,10 @@ async def push(request):
     rel = request.query_params.get("path", "")
     if not sandbox or not rel:
         return PlainTextResponse("missing sandbox/path", status_code=400)
-    target = _safe_path(sandbox, rel)
-    if target is None:
-        return PlainTextResponse("bad path", status_code=400)
+    try:
+        target = _safe_path(sandbox, rel)
+    except PathError as e:
+        return PlainTextResponse(str(e), status_code=400)
     target.parent.mkdir(parents=True, exist_ok=True)
     size = 0
     with open(target, "wb") as f:
@@ -175,9 +202,10 @@ async def pull(request):
     rel = request.query_params.get("path", "")
     if not sandbox or not rel:
         return PlainTextResponse("missing sandbox/path", status_code=400)
-    target = _resolve(sandbox, rel)
-    if target is None:
-        return PlainTextResponse("bad path", status_code=400)
+    try:
+        target = _resolve(sandbox, rel)
+    except PathError as e:
+        return PlainTextResponse(str(e), status_code=400)
     if not target.is_file():
         return PlainTextResponse("not found", status_code=404)
     log.info("HTTP pull sandbox=%s path=%s size=%s", sandbox, rel, target.stat().st_size)

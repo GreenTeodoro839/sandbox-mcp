@@ -81,9 +81,15 @@ Paths and files (IMPORTANT):
   is the destination name in the workspace (e.g. "input.zip"). It transfers the bytes
   directly -- you do NOT need upload_url, and the sandbox CANNOT read phone paths itself
   (never pass /sdcard/... to exec/fetch_url).
+  IMPORTANT: remote_path MUST be a RELATIVE name like "input.zip" or "data/in.csv",
+  NOT an absolute path like "/tmp/input.zip". The workspace is /workspace inside the
+  container -- /tmp, /home, /root are SEPARATE places. If you use /tmp/input.zip the
+  file ends up at /workspace/tmp/input.zip, which is NOT the same place. Use just
+  "input.zip" and it lands in the working directory where exec can find it.
 - To save a sandbox file back to the PHONE, call
-  pull_file(sandbox, remote_path, local_path) -- remote_path is the file in the workspace,
-  local_path is where to write it on the phone (e.g. /sdcard/Download/result.csv).
+  pull_file(sandbox, remote_path, local_path) -- remote_path is the file in the workspace
+  (same rule: relative name, NOT /tmp/...), local_path is where to write it on the phone
+  (e.g. /sdcard/Download/result.csv).
 - fetch_url(sandbox, url, dest) is ONLY for a file already hosted on a PUBLIC http(s)
   URL. Never point it at a URL from this same server -- that loops back and hangs.
 - Files OUT to the user as a link: download_url(sandbox, src) returns an HTTPS link you
