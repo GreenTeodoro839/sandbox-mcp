@@ -1,0 +1,38 @@
+# --- secrets / local config (NEVER commit) ---
+.env
+_cert/
+*.pem
+*.crt
+*.key
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# --- phone-side bridge: not part of the open-source server ---
+local-mcp/
+
+# --- personal debugging / one-off deploy scripts (not for publication) ---
+deploy/diag*.sh
+deploy/verify.sh
+deploy/setup_frp.sh
+deploy/test_*.sh
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# --- runtime data ---
+data/
+state.db
+*.db
+
+# --- os / editor ---
+.DS_Store
+.idea/
+.vscode/

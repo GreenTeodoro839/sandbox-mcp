@@ -1,0 +1,19 @@
+# Install to /etc/systemd/system/sandbox-mcp.service, then:
+#   systemctl daemon-reload && systemctl enable --now sandbox-mcp
+[Unit]
+Description=sandbox-mcp (MCP server with Docker sandboxes)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+# Runs as root so it can manage the Docker daemon and read container-owned files.
+# Controlling Docker is already root-equivalent, so this adds no extra exposure.
+WorkingDirectory=/opt/sandbox-mcp
+EnvironmentFile=/opt/sandbox-mcp/.env
+ExecStart=/opt/sandbox-mcp/.venv/bin/python -m sandbox_mcp
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
