@@ -54,8 +54,11 @@ curl -fsSL https://get.docker.com | sh
 sudo mkdir -p /opt/sandbox-mcp && cd /opt/sandbox-mcp
 # 把本仓库内容放进来（git clone / scp 均可）
 
-# 2. 建基础镜像
-docker build -t sandbox-mcp-base:latest images/ -f images/Dockerfile.base
+# 2. 取沙箱基础镜像：已发布到 GHCR（amd64/arm64），无需自建。
+#    .env 里 SMCP_BASE_IMAGE 默认就指向它，首次建沙箱时 Docker 会自动拉取。
+#    （想自建就： docker build -t sandbox-mcp-base:latest images/ -f images/Dockerfile.base
+#     并把 .env 的 SMCP_BASE_IMAGE 改回 sandbox-mcp-base:latest）
+docker pull ghcr.io/greenteodoro839/sandbox-mcp-base:latest
 
 # 3. Python 环境
 python3 -m venv .venv
@@ -131,7 +134,7 @@ curl -s http://127.0.0.1:8000/healthz   # -> {"ok":true}
 
 | 变量 | 默认 | 作用 |
 |---|---|---|
-| `SMCP_BASE_IMAGE` | `sandbox-mcp-base:latest` | 自动建沙箱用的镜像（`create_sandbox` 可单独指定别的）。 |
+| `SMCP_BASE_IMAGE` | GHCR 已发布镜像 | 自动建沙箱用的镜像（`create_sandbox` 可单独指定别的）。`.env.example` 默认指向 `ghcr.io/greenteodoro839/sandbox-mcp-base:latest`；代码内置回退为本地 `sandbox-mcp-base:latest`。 |
 | `SMCP_SANDBOX_NETWORK` | `bridge` | 沙箱网络模式；设 `none` 完全断网。 |
 | `SMCP_MEM_LIMIT` | `2g` | 单沙箱内存上限。 |
 | `SMCP_CPUS` | `2` | 单沙箱 CPU 核数上限。 |
