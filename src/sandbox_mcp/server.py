@@ -68,9 +68,11 @@ Managing sandboxes:
 - create_sandbox is optional (exec/run_background auto-create); use it only to pre-make one.
 
 Paths and files (IMPORTANT):
-- Every path is RELATIVE to the sandbox working directory. Use plain names like
-  "input.zip" or "out/result.csv". Do NOT pass absolute paths like /home/... or
-  /root/... to upload_url / download_url / read_text -- they are rejected.
+- Paths are relative to the sandbox working directory (which is /workspace inside the
+  sandbox). Prefer plain names like "input.zip" or "out/result.csv". An absolute
+  /workspace/... path also works (it is the same place). Other absolute paths like
+  /root/... or /home/... are NOT reachable by upload_url / download_url / read_text --
+  put files under the workspace.
 - Small text (scripts, configs, short results): write_text / read_text. Large or binary
   files IN: fetch_url(sandbox,url,dest) if already at a URL, else upload_url(sandbox,dest).
   Files OUT to the user: download_url(sandbox,src).

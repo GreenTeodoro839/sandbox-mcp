@@ -18,9 +18,21 @@ log = logging.getLogger("sandbox_mcp")
 
 
 def _safe_path(sandbox: str, rel: str) -> Path | None:
-    """Resolve `rel` under the sandbox workspace, rejecting path traversal."""
+    """Resolve `rel` under the sandbox workspace, rejecting path traversal.
+
+    Models routinely pass the in-container absolute path -- the workspace is
+    bind-mounted at /workspace inside the sandbox, so `exec`/`ls` show files as
+    /workspace/foo.  Normalize any absolute path (and a leading /workspace prefix)
+    back to a path relative to the workspace root before resolving, so such a
+    dest uploads/downloads correctly instead of 400-ing as "bad path"."""
     base = (config.DATA_DIR / sandbox / "workspace").resolve()
-    target = (base / rel).resolve()
+    pp = PurePosixPath(str(rel).strip())
+    if pp.is_absolute():
+        parts = pp.parts[1:]  # drop the leading "/"
+        if parts and parts[0] == "workspace":
+            parts = parts[1:]  # drop the container mount point
+        pp = PurePosixPath(*parts) if parts else PurePosixPath()
+    target = (base / pp).resolve()
     try:
         target.relative_to(base)
     except ValueError:
