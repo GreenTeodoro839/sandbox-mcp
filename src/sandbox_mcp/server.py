@@ -26,9 +26,9 @@ INSTRUCTIONS = """\
 This is the user's Linux sandbox: a real shell with full command execution. It is the
 "Linux" / "shell" / "terminal" / "沙箱" the user refers to. For ANY request to run a
 command, run code, process or convert files, install packages, or "use Linux / the
-shell / the sandbox", use THIS server. A separate local file-transfer server may also
-be connected; that one ONLY moves files and CANNOT run commands, so never use it for
-shell/command tasks.
+shell / the sandbox", use THIS server. The same toolset also includes push_file /
+pull_file, which move files between the user's PHONE and this sandbox -- use those for
+phone<->sandbox transfer (details under "Paths and files").
 
 Running things:
 - exec(sandbox, command) runs a shell command and WAITS for it to finish. The sandbox
@@ -75,19 +75,20 @@ Paths and files (IMPORTANT):
   /root/... or /home/... are NOT reachable by upload_url / download_url / read_text --
   put files under the workspace.
 - Small text (scripts, configs, short results): write_text / read_text.
-- To bring a file FROM THE PHONE into the sandbox (e.g. a path like
-  /sdcard/Download/x.zip): (1) call upload_url(sandbox, dest) here to get an HTTPS
-  upload URL, then (2) call the LOCAL BRIDGE server's push_file(phone_path, that
-  upload_url) to send the bytes up. The sandbox CANNOT read phone paths itself: do NOT
-  pass file:///sdcard/... or a phone path to fetch_url/upload_url/download_url, and do
-  NOT give push_file a sandbox path as its url -- its url must be the upload_url from
-  step 1.
+- To bring a file FROM THE PHONE into the sandbox, call
+  push_file(local_path, sandbox, remote_path) in ONE step: local_path is the absolute
+  phone path (e.g. /sdcard/Download/x.zip), sandbox is this sandbox's name, remote_path
+  is the destination name in the workspace (e.g. "input.zip"). It transfers the bytes
+  directly -- you do NOT need upload_url, and the sandbox CANNOT read phone paths itself
+  (never pass /sdcard/... to exec/fetch_url).
+- To save a sandbox file back to the PHONE, call
+  pull_file(sandbox, remote_path, local_path) -- remote_path is the file in the workspace,
+  local_path is where to write it on the phone (e.g. /sdcard/Download/result.csv).
 - fetch_url(sandbox, url, dest) is ONLY for a file already hosted on a PUBLIC http(s)
-  URL. Never point it at a URL from this same server (e.g. a download_url you just
-  made) -- that loops back and hangs.
-- Files OUT to the user: download_url(sandbox, src) returns a link you give the user.
-  To save a sandbox file back to the PHONE, give that download_url to the bridge's
-  pull_file(download_url, phone_path).
+  URL. Never point it at a URL from this same server -- that loops back and hangs.
+- Files OUT to the user as a link: download_url(sandbox, src) returns an HTTPS link you
+  can give the user to open in a browser. (To put a file onto the phone's storage, use
+  pull_file instead.)
 - Preinstalled: python3 (pypdf, pdfplumber, pandas, requests), git, curl, unzip.
 - Chinese/Unicode filenames inside ZIP archives are usually GBK-encoded; plain `unzip`
   will garble them. Extract with Python instead, decoding cp437->gb18030:
@@ -315,6 +316,12 @@ def build_app():
     app.router.routes.append(
         Route("/files/put/{sig}", files.upload, methods=["PUT", "POST"])
     )
+    # Stable bearer-authed transfer endpoints used by the gateway bridge's
+    # self-contained push_file/pull_file (no per-file signed URL through the LLM).
+    app.router.routes.append(
+        Route("/files/push", files.push, methods=["POST", "PUT"])
+    )
+    app.router.routes.append(Route("/files/pull", files.pull, methods=["GET"]))
     app.router.routes.append(Route("/healthz", files.health, methods=["GET"]))
     # Patch: Miclaw may omit the required Accept header, causing 406 from the MCP
     # SDK.  Inject it at the ASGI layer before the SDK sees the request.

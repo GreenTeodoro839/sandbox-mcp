@@ -137,5 +137,52 @@ async def upload(request):
     return JSONResponse({"ok": True, "path": payload["p"], "size": size})
 
 
+def _bearer_ok(request) -> bool:
+    """True if the request carries the MCP bearer token. Used by the stable
+    push/pull endpoints (the gateway bridge holds this token already, since it
+    also proxies /mcp), so they need no per-file signed URL."""
+    return request.headers.get("authorization", "") == f"Bearer {config.TOKEN}"
+
+
+async def push(request):
+    """Stable bearer-authed upload: the gateway POSTs file bytes here with
+    ?sandbox=&path= instead of fetching a one-time signed URL first. Lets the AI
+    call one self-contained push_file(local_path, sandbox, remote_path) tool."""
+    if not _bearer_ok(request):
+        return PlainTextResponse("unauthorized", status_code=401)
+    sandbox = request.query_params.get("sandbox", "")
+    rel = request.query_params.get("path", "")
+    if not sandbox or not rel:
+        return PlainTextResponse("missing sandbox/path", status_code=400)
+    target = _safe_path(sandbox, rel)
+    if target is None:
+        return PlainTextResponse("bad path", status_code=400)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    with open(target, "wb") as f:
+        async for chunk in request.stream():
+            f.write(chunk)
+            size += len(chunk)
+    log.info("HTTP push sandbox=%s path=%s size=%s", sandbox, rel, size)
+    return JSONResponse({"ok": True, "path": rel, "size": size})
+
+
+async def pull(request):
+    """Stable bearer-authed download counterpart to push()."""
+    if not _bearer_ok(request):
+        return PlainTextResponse("unauthorized", status_code=401)
+    sandbox = request.query_params.get("sandbox", "")
+    rel = request.query_params.get("path", "")
+    if not sandbox or not rel:
+        return PlainTextResponse("missing sandbox/path", status_code=400)
+    target = _resolve(sandbox, rel)
+    if target is None:
+        return PlainTextResponse("bad path", status_code=400)
+    if not target.is_file():
+        return PlainTextResponse("not found", status_code=404)
+    log.info("HTTP pull sandbox=%s path=%s size=%s", sandbox, rel, target.stat().st_size)
+    return FileResponse(target, filename=_decode_name(target.name))
+
+
 async def health(request):
     return JSONResponse({"ok": True})
