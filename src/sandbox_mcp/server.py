@@ -73,6 +73,9 @@ Paths and files (IMPORTANT):
   /root/, /home/, /tmp/ are SEPARATE from the workspace and NOT reachable by
   upload_file / download_file / read_text -- and a dest like "tmp/x" lands at
   /workspace/tmp/x, not /tmp/x. Keep files under the workspace with plain relative names.
+- Every file tool (write_text, read_text, list_files, upload_file, download_file) takes
+  the `sandbox` name as an argument, exactly like exec -- ALWAYS pass it; a /workspace
+  path alone does not identify which sandbox.
 - Small text (scripts, configs, short results): write_text / read_text.
 - Move whole files in or out of the sandbox with upload_file (bring one in) and
   download_file (get one out) -- see each tool's own description for its exact
