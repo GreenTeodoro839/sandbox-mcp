@@ -41,14 +41,15 @@
 | `run_background(sandbox, command)` → `job_id` | 启动长任务，立即返回 |
 | `get_job(job_id)` / `stop_job(job_id)` | 查看进度日志 / 停止 |
 | `list_files` / `read_text` / `write_text` | 列目录 / 读写**小**文本（脚本、配置） |
-| `upload_url(sandbox, dest)` | 拿**上传**大文件的签名 URL（PUT） |
-| `download_url(sandbox, src)` | 拿**下载**大文件的签名 URL（GET） |
-| `fetch_url(sandbox, url, dest)` | 让沙箱自己 curl 一个网址进来（全速） |
+| `download_url(sandbox, src)` | 拿**下载**大文件的签名 URL（GET），给用户当浏览器链接 |
+| `fetch_url(sandbox, url, dest)` | 让沙箱自己 curl 一个**公网**网址进来（全速） |
+
+> 手机⇄沙箱的**整文件收发**由[手机端桥接器](https://github.com/GreenTeodoro839/sandbox-mcp-bridge)的 `push_file` / `pull_file` 完成（直连服务端 `/files/push|pull`，字节不经过 AI 上下文）。服务端仍保留签名 `PUT`/`GET` 路由（`/files/...`）供手动 `curl`，只是不再作为 MCP 工具暴露（`upload_url` 已下线）。
 
 典型流程（传多个 PDF 然后处理）：
-1. AI 多次 `upload_url` 拿链接 → `curl -T a.pdf '<url>'` 把 PDF 推进沙箱
+1. `push_file` 把每个 PDF **一步**推进沙箱（或 `fetch_url` 拉公网文件）
 2. AI `write_text` 写处理脚本 → `run_background` 跑
-3. `get_job` 轮询 → 完成后 `download_url` 给你结果链接
+3. `get_job` 轮询 → 完成后 `pull_file` 存回手机，或 `download_url` 给你一个结果链接
 
 ## 部署（在 Debian 主机上）
 
