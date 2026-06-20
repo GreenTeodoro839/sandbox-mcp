@@ -71,7 +71,7 @@ Paths and files (IMPORTANT):
   sandbox). Prefer plain names like "input.zip" or "out/result.csv". An absolute
   /workspace/... path also works (it is the same place). Other absolute paths like
   /root/, /home/, /tmp/ are SEPARATE from the workspace and NOT reachable by
-  download_url / read_text / push_file / pull_file -- and a dest like "tmp/x" lands at
+  download_url / read_text -- and a dest like "tmp/x" lands at
   /workspace/tmp/x, not /tmp/x. Keep files under the workspace with plain relative names.
 - Small text (scripts, configs, short results): write_text / read_text.
 - fetch_url(sandbox, url, dest) is ONLY for a file already hosted on a PUBLIC http(s)
