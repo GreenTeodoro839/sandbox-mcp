@@ -26,9 +26,7 @@ INSTRUCTIONS = """\
 This is the user's Linux sandbox: a real shell with full command execution. It is the
 "Linux" / "shell" / "terminal" / "沙箱" the user refers to. For ANY request to run a
 command, run code, process or convert files, install packages, or "use Linux / the
-shell / the sandbox", use THIS server. The same toolset also includes push_file /
-pull_file, which move files between the user's PHONE and this sandbox -- use those for
-phone<->sandbox transfer (details under "Paths and files").
+shell / the sandbox", use THIS server.
 
 Running things:
 - exec(sandbox, command) runs a shell command and WAITS for it to finish. The sandbox
@@ -72,29 +70,15 @@ Paths and files (IMPORTANT):
 - Paths are relative to the sandbox working directory (which is /workspace inside the
   sandbox). Prefer plain names like "input.zip" or "out/result.csv". An absolute
   /workspace/... path also works (it is the same place). Other absolute paths like
-  /root/... or /home/... are NOT reachable by upload_url / download_url / read_text --
-  put files under the workspace.
+  /root/, /home/, /tmp/ are SEPARATE from the workspace and NOT reachable by
+  upload_url / download_url / read_text -- and a dest like "tmp/x" lands at
+  /workspace/tmp/x, not /tmp/x. Keep files under the workspace with plain relative names.
 - Small text (scripts, configs, short results): write_text / read_text.
-- To bring a file FROM THE PHONE into the sandbox, call
-  push_file(local_path, sandbox, remote_path) in ONE step: local_path is the absolute
-  phone path (e.g. /sdcard/Download/x.zip), sandbox is this sandbox's name, remote_path
-  is the destination name in the workspace (e.g. "input.zip"). It transfers the bytes
-  directly -- you do NOT need upload_url, and the sandbox CANNOT read phone paths itself
-  (never pass /sdcard/... to exec/fetch_url).
-  IMPORTANT: remote_path MUST be a RELATIVE name like "input.zip" or "data/in.csv",
-  NOT an absolute path like "/tmp/input.zip". The workspace is /workspace inside the
-  container -- /tmp, /home, /root are SEPARATE places. If you use /tmp/input.zip the
-  file ends up at /workspace/tmp/input.zip, which is NOT the same place. Use just
-  "input.zip" and it lands in the working directory where exec can find it.
-- To save a sandbox file back to the PHONE, call
-  pull_file(sandbox, remote_path, local_path) -- remote_path is the file in the workspace
-  (same rule: relative name, NOT /tmp/...), local_path is where to write it on the phone
-  (e.g. /sdcard/Download/result.csv).
 - fetch_url(sandbox, url, dest) is ONLY for a file already hosted on a PUBLIC http(s)
-  URL. Never point it at a URL from this same server -- that loops back and hangs.
+  URL. Never point it at a URL from this same server -- that loops back and hangs. The
+  sandbox CANNOT read phone paths; never pass /sdcard/... to exec / fetch_url.
 - Files OUT to the user as a link: download_url(sandbox, src) returns an HTTPS link you
-  can give the user to open in a browser. (To put a file onto the phone's storage, use
-  pull_file instead.)
+  can give the user to open in a browser.
 - Preinstalled: python3 (pypdf, pdfplumber, pandas, requests), git, curl, unzip.
 - Chinese/Unicode filenames inside ZIP archives are usually GBK-encoded; plain `unzip`
   will garble them. Extract with Python instead, decoding cp437->gb18030:
@@ -245,8 +229,8 @@ def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
     """Make the sandbox download a PUBLIC http(s):// URL directly into its
     workspace at `dest` (server-side, full bandwidth). Use this only for files
     already hosted on the internet. To bring a file FROM THE PHONE into the
-    sandbox, do NOT use this -- call upload_url(sandbox, dest) and then the local
-    bridge's push_file(phone_path, that_upload_url)."""
+    sandbox, do NOT use this -- use the gateway's one-step
+    push_file(local_path, sandbox, remote_path) instead."""
     _tlog(f"TOOL fetch_url sandbox={sandbox} url={url} dest={dest}")
     u = urlparse(url)
     if u.scheme not in ("http", "https"):
@@ -254,15 +238,14 @@ def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
             "error": (
                 f"fetch_url only accepts http(s):// URLs (got scheme "
                 f"{u.scheme or 'none'!r}). The sandbox cannot read phone paths like "
-                "file:///sdcard/... To bring a PHONE file in, call "
-                "upload_url(sandbox, dest) to get an upload URL, then use the local "
-                "bridge's push_file(phone_path, upload_url)."
+                "file:///sdcard/... To bring a PHONE file in, use the gateway's "
+                "one-step push_file(local_path, sandbox, remote_path)."
             )
         }
     # Refuse to fetch our own public endpoint: that makes the sandbox call back
     # into this server through the tunnel, blocking the worker on a request that
-    # loops to itself -- it wedges the server. A phone file must go via upload_url
-    # + the bridge's push_file, never by fetching a /files URL from inside.
+    # loops to itself -- it wedges the server. A phone file must go via the
+    # gateway's push_file, never by fetching a /files URL from inside.
     own = urlparse(config.PUBLIC_BASE_URL)
     if u.netloc and own.netloc and u.netloc == own.netloc:
         return {
@@ -270,8 +253,8 @@ def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
                 "Refusing to fetch this server's own URL from inside the sandbox "
                 "(it would loop back and hang). If this is a download_url you just "
                 "made, the file is already produced by the sandbox -- give that URL "
-                "to the user directly. To bring a PHONE file IN, use "
-                "upload_url(sandbox, dest) + the bridge's push_file(phone_path, url)."
+                "to the user directly. To bring a PHONE file IN, use the gateway's "
+                "push_file(local_path, sandbox, remote_path)."
             )
         }
     # Bounded timeouts so a slow/stuck URL can never hang a worker indefinitely.
