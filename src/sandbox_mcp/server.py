@@ -71,7 +71,7 @@ Paths and files (IMPORTANT):
   sandbox). Prefer plain names like "input.zip" or "out/result.csv". An absolute
   /workspace/... path also works (it is the same place). Other absolute paths like
   /root/, /home/, /tmp/ are SEPARATE from the workspace and NOT reachable by
-  upload_url / download_url / read_text -- and a dest like "tmp/x" lands at
+  download_url / read_text / push_file / pull_file -- and a dest like "tmp/x" lands at
   /workspace/tmp/x, not /tmp/x. Keep files under the workspace with plain relative names.
 - Small text (scripts, configs, short results): write_text / read_text.
 - fetch_url(sandbox, url, dest) is ONLY for a file already hosted on a PUBLIC http(s)
@@ -195,23 +195,16 @@ def read_text_tool(sandbox: str, path: str) -> dict:
 @mcp.tool(name="write_text")
 def write_text_tool(sandbox: str, path: str, content: str) -> dict:
     """Write/overwrite a small text file, e.g. a script you want to run. For
-    large or binary files use upload_url instead."""
+    large or binary files, bring them in with push_file (from the phone) or
+    fetch_url (from a public URL) instead."""
     return files.write_text(sandbox, path, content)
 
 
-@mcp.tool(name="upload_url")
-def upload_url_tool(sandbox: str, dest: str, ttl_seconds: int = 0) -> dict:
-    """Get a one-time HTTPS URL to UPLOAD a (possibly large) file into the
-    sandbox workspace at `dest`. The file bytes are PUT to this URL over plain
-    HTTP -- never send big files through tool arguments. Returns a curl example."""
-    _tlog(f"TOOL upload_url sandbox={sandbox} dest={dest}")
-    url = auth.make_url(sandbox, dest, "put", ttl_seconds or None)
-    return {
-        "upload_url": url,
-        "method": "PUT",
-        "dest": dest,
-        "example": f"curl -T <local-file> '{url}'",
-    }
+# upload_url is intentionally NOT exposed as a tool: phone->sandbox transfer is the
+# gateway's push_file (direct, with no URL to PUT to), so an agent-facing PUT-URL is a
+# dead end -- the model would get a URL and have nothing to upload the bytes with. The
+# signed PUT route (/files/put/{sig}) stays available for manual curl uploads, and
+# auth.make_url(sandbox, dest, "put") can still mint one outside the tool surface.
 
 
 @mcp.tool(name="download_url")
