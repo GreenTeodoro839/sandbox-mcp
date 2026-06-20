@@ -41,15 +41,17 @@
 | `run_background(sandbox, command)` → `job_id` | 启动长任务，立即返回 |
 | `get_job(job_id)` / `stop_job(job_id)` | 查看进度日志 / 停止 |
 | `list_files` / `read_text` / `write_text` | 列目录 / 读写**小**文本（脚本、配置） |
-| `download_url(sandbox, src)` | 拿**下载**大文件的签名 URL（GET），给用户当浏览器链接 |
+| `upload_url(sandbox, dest)` | 拿**上传**大文件的一次性 URL（PUT），由客户端把字节 PUT 上去 |
+| `download_url(sandbox, src)` | 拿**下载**大文件的一次性 URL（GET），给用户当浏览器链接 |
 | `fetch_url(sandbox, url, dest)` | 让沙箱自己 curl 一个**公网**网址进来（全速） |
 
-> 手机⇄沙箱的**整文件收发**由[手机端桥接器](https://github.com/GreenTeodoro839/sandbox-mcp-bridge)的 `push_file` / `pull_file` 完成（直连服务端 `/files/push|pull`，字节不经过 AI 上下文）。服务端仍保留签名 `PUT`/`GET` 路由（`/files/...`）供手动 `curl`，只是不再作为 MCP 工具暴露（`upload_url` 已下线）。
+> 大文件**不走工具参数**（会爆 AI 上下文）：`upload_url`/`download_url` 返回一次性签名 URL，字节走普通 HTTP（PUT/GET），由客户端环境完成。这是本服务**通用**的文件收发方式，不绑定任何特定客户端。
+> 手机端的 Miclaw 自己没有 PUT 文件的能力，所以[桥接器](https://github.com/GreenTeodoro839/sandbox-mcp-bridge)用 `push_file` / `pull_file` 代它按路径收发（并对 Miclaw 隐藏 `upload_url` 这个对它而言的死胡同）——那是 Miclaw 侧的适配，服务端不感知。
 
 典型流程（传多个 PDF 然后处理）：
-1. `push_file` 把每个 PDF **一步**推进沙箱（或 `fetch_url` 拉公网文件）
+1. AI `upload_url` 拿链接 → 客户端 `curl -T a.pdf '<url>'` 把 PDF 推进沙箱（Miclaw 端即桥接器的 `push_file`）
 2. AI `write_text` 写处理脚本 → `run_background` 跑
-3. `get_job` 轮询 → 完成后 `pull_file` 存回手机，或 `download_url` 给你一个结果链接
+3. `get_job` 轮询 → 完成后 `download_url` 给用户结果链接（Miclaw 端可用 `pull_file` 存回手机）
 
 ## 部署（在 Debian 主机上）
 

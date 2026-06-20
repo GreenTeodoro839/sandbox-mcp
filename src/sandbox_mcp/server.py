@@ -71,12 +71,14 @@ Paths and files (IMPORTANT):
   sandbox). Prefer plain names like "input.zip" or "out/result.csv". An absolute
   /workspace/... path also works (it is the same place). Other absolute paths like
   /root/, /home/, /tmp/ are SEPARATE from the workspace and NOT reachable by
-  download_url / read_text -- and a dest like "tmp/x" lands at
+  upload_url / download_url / read_text -- and a dest like "tmp/x" lands at
   /workspace/tmp/x, not /tmp/x. Keep files under the workspace with plain relative names.
 - Small text (scripts, configs, short results): write_text / read_text.
+- Bring a LOCAL file IN: upload_url(sandbox, dest) returns a one-time URL; PUT the bytes
+  to it out-of-band (e.g. curl -T). The sandbox only sees its own workspace -- it cannot
+  read the client's local filesystem, so never pass a host path to exec / fetch_url.
 - fetch_url(sandbox, url, dest) is ONLY for a file already hosted on a PUBLIC http(s)
-  URL. Never point it at a URL from this same server -- that loops back and hangs. The
-  sandbox CANNOT read phone paths; never pass /sdcard/... to exec / fetch_url.
+  URL. Never point it at a URL from this same server -- that loops back and hangs.
 - Files OUT to the user as a link: download_url(sandbox, src) returns an HTTPS link you
   can give the user to open in a browser.
 - Preinstalled: python3 (pypdf, pdfplumber, pandas, requests), git, curl, unzip.
@@ -194,17 +196,26 @@ def read_text_tool(sandbox: str, path: str) -> dict:
 
 @mcp.tool(name="write_text")
 def write_text_tool(sandbox: str, path: str, content: str) -> dict:
-    """Write/overwrite a small text file, e.g. a script you want to run. For
-    large or binary files, bring them in with push_file (from the phone) or
-    fetch_url (from a public URL) instead."""
+    """Write/overwrite a small text file, e.g. a script you want to run. For large
+    or binary files use upload_url (then PUT the bytes) or fetch_url (from a public
+    URL) instead."""
     return files.write_text(sandbox, path, content)
 
 
-# upload_url is intentionally NOT exposed as a tool: phone->sandbox transfer is the
-# gateway's push_file (direct, with no URL to PUT to), so an agent-facing PUT-URL is a
-# dead end -- the model would get a URL and have nothing to upload the bytes with. The
-# signed PUT route (/files/put/{sig}) stays available for manual curl uploads, and
-# auth.make_url(sandbox, dest, "put") can still mint one outside the tool surface.
+@mcp.tool(name="upload_url")
+def upload_url_tool(sandbox: str, dest: str, ttl_seconds: int = 0) -> dict:
+    """Get a one-time HTTPS URL to UPLOAD a (possibly large) file into the sandbox
+    workspace at `dest`. PUT the bytes to this URL out-of-band (e.g. `curl -T <file>
+    '<url>'`) -- never send big files through tool arguments, they overflow the
+    context. `dest` is a workspace-relative path. Returns a curl example."""
+    _tlog(f"TOOL upload_url sandbox={sandbox} dest={dest}")
+    url = auth.make_url(sandbox, dest, "put", ttl_seconds or None)
+    return {
+        "upload_url": url,
+        "method": "PUT",
+        "dest": dest,
+        "example": f"curl -T <local-file> '{url}'",
+    }
 
 
 @mcp.tool(name="download_url")
@@ -221,24 +232,24 @@ def download_url_tool(sandbox: str, src: str, ttl_seconds: int = 0) -> dict:
 def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
     """Make the sandbox download a PUBLIC http(s):// URL directly into its
     workspace at `dest` (server-side, full bandwidth). Use this only for files
-    already hosted on the internet. To bring a file FROM THE PHONE into the
-    sandbox, do NOT use this -- use the gateway's one-step
-    push_file(local_path, sandbox, remote_path) instead."""
+    already hosted on the internet. To bring in a LOCAL file (not on a public URL),
+    use upload_url(sandbox, dest) and PUT the bytes to that URL instead."""
     _tlog(f"TOOL fetch_url sandbox={sandbox} url={url} dest={dest}")
     u = urlparse(url)
     if u.scheme not in ("http", "https"):
         return {
             "error": (
                 f"fetch_url only accepts http(s):// URLs (got scheme "
-                f"{u.scheme or 'none'!r}). The sandbox cannot read phone paths like "
-                "file:///sdcard/... To bring a PHONE file in, use the gateway's "
-                "one-step push_file(local_path, sandbox, remote_path)."
+                f"{u.scheme or 'none'!r}). The sandbox can only read files inside its "
+                "own workspace, not arbitrary host paths (file:///...). To bring a "
+                "LOCAL file in, use upload_url(sandbox, dest) and PUT the bytes to "
+                "that URL."
             )
         }
     # Refuse to fetch our own public endpoint: that makes the sandbox call back
     # into this server through the tunnel, blocking the worker on a request that
-    # loops to itself -- it wedges the server. A phone file must go via the
-    # gateway's push_file, never by fetching a /files URL from inside.
+    # loops to itself -- it wedges the server. A local file must come in via
+    # upload_url (PUT from outside), never by fetching a /files URL from inside.
     own = urlparse(config.PUBLIC_BASE_URL)
     if u.netloc and own.netloc and u.netloc == own.netloc:
         return {
@@ -246,8 +257,8 @@ def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
                 "Refusing to fetch this server's own URL from inside the sandbox "
                 "(it would loop back and hang). If this is a download_url you just "
                 "made, the file is already produced by the sandbox -- give that URL "
-                "to the user directly. To bring a PHONE file IN, use the gateway's "
-                "push_file(local_path, sandbox, remote_path)."
+                "to the user directly. To bring a LOCAL file IN, use "
+                "upload_url(sandbox, dest) and PUT the bytes to that URL."
             )
         }
     # Bounded timeouts so a slow/stuck URL can never hang a worker indefinitely.
