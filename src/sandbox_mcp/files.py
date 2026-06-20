@@ -114,7 +114,7 @@ def read_text(sandbox: str, rel: str) -> dict:
     size = target.stat().st_size
     if size > config.READ_TEXT_MAX_BYTES:
         return {
-            "error": f"file too large for inline read ({size} bytes); use download_url"
+            "error": f"file too large for inline read ({size} bytes); use download_file"
         }
     return {"path": rel, "content": smart_decode(target.read_bytes())}
 

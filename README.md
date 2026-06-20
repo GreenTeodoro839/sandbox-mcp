@@ -41,17 +41,17 @@
 | `run_background(sandbox, command)` → `job_id` | 启动长任务，立即返回 |
 | `get_job(job_id)` / `stop_job(job_id)` | 查看进度日志 / 停止 |
 | `list_files` / `read_text` / `write_text` | 列目录 / 读写**小**文本（脚本、配置） |
-| `upload_url(sandbox, dest)` | 拿**上传**大文件的一次性 URL（PUT），由客户端把字节 PUT 上去 |
-| `download_url(sandbox, src)` | 拿**下载**大文件的一次性 URL（GET），给用户当浏览器链接 |
+| `upload_file(sandbox, dest)` | 拿**上传**大文件的一次性 URL（PUT），由客户端把字节 PUT 上去 |
+| `download_file(sandbox, src)` | 拿**下载**大文件的一次性 URL（GET），给用户当浏览器链接 |
 | `fetch_url(sandbox, url, dest)` | 让沙箱自己 curl 一个**公网**网址进来（全速） |
 
-> 大文件**不走工具参数**（会爆 AI 上下文）：`upload_url`/`download_url` 返回一次性签名 URL，字节走普通 HTTP（PUT/GET），由客户端环境完成。这是本服务**通用**的文件收发方式，不绑定任何特定客户端。
-> 手机端的 Miclaw 自己没有 PUT 文件的能力，所以[桥接器](https://github.com/GreenTeodoro839/sandbox-mcp-bridge)用 `push_file` / `pull_file` 代它按路径收发（并对 Miclaw 隐藏 `upload_url` 这个对它而言的死胡同）——那是 Miclaw 侧的适配，服务端不感知。
+> 大文件**不走工具参数**（会爆 AI 上下文）：`upload_file`/`download_file` 返回一次性签名 URL，字节走普通 HTTP（PUT/GET），由客户端环境完成。这是本服务**通用**的文件收发方式，不绑定任何特定客户端。工具名只表意图（上传/下载），具体机制写在各自的描述里。
+> 手机端的 Miclaw 自己没有 PUT 文件的能力，所以[桥接器](https://github.com/GreenTeodoro839/sandbox-mcp-bridge)用**同名**的 `upload_file` / `download_file` **覆盖**它们，改成按路径直传/直存——名字不变，所以上面这段通用说明对两侧都成立。
 
 典型流程（传多个 PDF 然后处理）：
-1. AI `upload_url` 拿链接 → 客户端 `curl -T a.pdf '<url>'` 把 PDF 推进沙箱（Miclaw 端即桥接器的 `push_file`）
+1. AI `upload_file` 拿链接 → 客户端 `curl -T a.pdf '<url>'` 把 PDF 推进沙箱（Miclaw 端同名工具即"按路径直传"）
 2. AI `write_text` 写处理脚本 → `run_background` 跑
-3. `get_job` 轮询 → 完成后 `download_url` 给用户结果链接（Miclaw 端可用 `pull_file` 存回手机）
+3. `get_job` 轮询 → 完成后 `download_file` 给用户结果链接（Miclaw 端给 `local_path` 即存回手机）
 
 ## 部署（在 Debian 主机上）
 
@@ -167,7 +167,7 @@ Miclaw 一次只能加一个 server。直接粘贴下面这条，把尖括号占
 | `SMCP_JOB_TIMEOUT` | `3600` | `run_background` 任务的默认超时。 |
 | `SMCP_JOB_LOG_RETENTION` | `86400` (1d) | 后台任务日志保留多久后由 GC 清理。 |
 | `SMCP_URL_TTL` | `3600` | 文件上传/下载签名 URL 的有效期。 |
-| `SMCP_READ_TEXT_MAX_BYTES` | `200000` | `read_text` 内联读取的大小上限，超过应改用 `download_url`。 |
+| `SMCP_READ_TEXT_MAX_BYTES` | `200000` | `read_text` 内联读取的大小上限，超过应改用 `download_file`。 |
 
 ## 安全须知
 

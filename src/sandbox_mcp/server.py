@@ -71,16 +71,15 @@ Paths and files (IMPORTANT):
   sandbox). Prefer plain names like "input.zip" or "out/result.csv". An absolute
   /workspace/... path also works (it is the same place). Other absolute paths like
   /root/, /home/, /tmp/ are SEPARATE from the workspace and NOT reachable by
-  upload_url / download_url / read_text -- and a dest like "tmp/x" lands at
+  upload_file / download_file / read_text -- and a dest like "tmp/x" lands at
   /workspace/tmp/x, not /tmp/x. Keep files under the workspace with plain relative names.
 - Small text (scripts, configs, short results): write_text / read_text.
-- Bring a LOCAL file IN: upload_url(sandbox, dest) returns a one-time URL; PUT the bytes
-  to it out-of-band (e.g. curl -T). The sandbox only sees its own workspace -- it cannot
-  read the client's local filesystem, so never pass a host path to exec / fetch_url.
+- Move whole files in or out of the sandbox with upload_file (bring one in) and
+  download_file (get one out) -- see each tool's own description for its exact
+  arguments. The sandbox only sees its own workspace; it cannot read the client's local
+  filesystem, so never pass a host path to exec / fetch_url.
 - fetch_url(sandbox, url, dest) is ONLY for a file already hosted on a PUBLIC http(s)
   URL. Never point it at a URL from this same server -- that loops back and hangs.
-- Files OUT to the user as a link: download_url(sandbox, src) returns an HTTPS link you
-  can give the user to open in a browser.
 - Preinstalled: python3 (pypdf, pdfplumber, pandas, requests), git, curl, unzip.
 - Chinese/Unicode filenames inside ZIP archives are usually GBK-encoded; plain `unzip`
   will garble them. Extract with Python instead, decoding cp437->gb18030:
@@ -190,42 +189,41 @@ def list_files_tool(sandbox: str, path: str = ".") -> dict:
 @mcp.tool(name="read_text")
 def read_text_tool(sandbox: str, path: str) -> dict:
     """Read a small text file inline (e.g. a script or log). For large or binary
-    files use download_url instead."""
+    files use download_file instead."""
     return files.read_text(sandbox, path)
 
 
 @mcp.tool(name="write_text")
 def write_text_tool(sandbox: str, path: str, content: str) -> dict:
     """Write/overwrite a small text file, e.g. a script you want to run. For large
-    or binary files use upload_url (then PUT the bytes) or fetch_url (from a public
-    URL) instead."""
+    or binary files use upload_file or fetch_url (from a public URL) instead."""
     return files.write_text(sandbox, path, content)
 
 
-@mcp.tool(name="upload_url")
-def upload_url_tool(sandbox: str, dest: str, ttl_seconds: int = 0) -> dict:
-    """Get a one-time HTTPS URL to UPLOAD a (possibly large) file into the sandbox
-    workspace at `dest`. PUT the bytes to this URL out-of-band (e.g. `curl -T <file>
-    '<url>'`) -- never send big files through tool arguments, they overflow the
-    context. `dest` is a workspace-relative path. Returns a curl example."""
-    _tlog(f"TOOL upload_url sandbox={sandbox} dest={dest}")
+@mcp.tool(name="upload_file")
+def upload_file_tool(sandbox: str, dest: str, ttl_seconds: int = 0) -> dict:
+    """Bring a file INTO the sandbox workspace at `dest` (a workspace-relative path).
+    Returns a one-time HTTPS URL; PUT the bytes to it out-of-band (e.g. `curl -T
+    <file> '<url>'`) -- never send big files through tool arguments, they overflow
+    the context. Returns a curl example."""
+    _tlog(f"TOOL upload_file sandbox={sandbox} dest={dest}")
     url = auth.make_url(sandbox, dest, "put", ttl_seconds or None)
     return {
-        "upload_url": url,
+        "url": url,
         "method": "PUT",
         "dest": dest,
         "example": f"curl -T <local-file> '{url}'",
     }
 
 
-@mcp.tool(name="download_url")
-def download_url_tool(sandbox: str, src: str, ttl_seconds: int = 0) -> dict:
-    """Get a one-time HTTPS URL to DOWNLOAD a file from the sandbox workspace.
-    Give this link to the user to open/save. Use this for large or binary outputs
-    instead of read_text."""
-    _tlog(f"TOOL download_url sandbox={sandbox} src={src}")
+@mcp.tool(name="download_file")
+def download_file_tool(sandbox: str, src: str, ttl_seconds: int = 0) -> dict:
+    """Get a file OUT of the sandbox workspace (`src`). Returns a one-time HTTPS
+    download URL -- give it to the user to open/save. Use this for large or binary
+    outputs instead of read_text."""
+    _tlog(f"TOOL download_file sandbox={sandbox} src={src}")
     url = auth.make_url(sandbox, src, "get", ttl_seconds or None)
-    return {"download_url": url, "src": src}
+    return {"url": url, "src": src}
 
 
 @mcp.tool(name="fetch_url")
@@ -233,7 +231,7 @@ def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
     """Make the sandbox download a PUBLIC http(s):// URL directly into its
     workspace at `dest` (server-side, full bandwidth). Use this only for files
     already hosted on the internet. To bring in a LOCAL file (not on a public URL),
-    use upload_url(sandbox, dest) and PUT the bytes to that URL instead."""
+    use upload_file instead."""
     _tlog(f"TOOL fetch_url sandbox={sandbox} url={url} dest={dest}")
     u = urlparse(url)
     if u.scheme not in ("http", "https"):
@@ -242,23 +240,21 @@ def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
                 f"fetch_url only accepts http(s):// URLs (got scheme "
                 f"{u.scheme or 'none'!r}). The sandbox can only read files inside its "
                 "own workspace, not arbitrary host paths (file:///...). To bring a "
-                "LOCAL file in, use upload_url(sandbox, dest) and PUT the bytes to "
-                "that URL."
+                "LOCAL file in, use upload_file."
             )
         }
     # Refuse to fetch our own public endpoint: that makes the sandbox call back
     # into this server through the tunnel, blocking the worker on a request that
     # loops to itself -- it wedges the server. A local file must come in via
-    # upload_url (PUT from outside), never by fetching a /files URL from inside.
+    # upload_file, never by fetching a /files URL from inside.
     own = urlparse(config.PUBLIC_BASE_URL)
     if u.netloc and own.netloc and u.netloc == own.netloc:
         return {
             "error": (
                 "Refusing to fetch this server's own URL from inside the sandbox "
-                "(it would loop back and hang). If this is a download_url you just "
-                "made, the file is already produced by the sandbox -- give that URL "
-                "to the user directly. To bring a LOCAL file IN, use "
-                "upload_url(sandbox, dest) and PUT the bytes to that URL."
+                "(it would loop back and hang). If this is a download_file link you "
+                "just made, the file is already produced by the sandbox -- give that "
+                "URL to the user directly. To bring a LOCAL file IN, use upload_file."
             )
         }
     # Bounded timeouts so a slow/stuck URL can never hang a worker indefinitely.
