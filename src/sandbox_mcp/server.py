@@ -305,8 +305,8 @@ def build_app():
     app.router.routes.append(
         Route("/files/put/{sig}", files.upload, methods=["PUT", "POST"])
     )
-    # Stable bearer-authed transfer endpoints used by the gateway bridge's
-    # self-contained push_file/pull_file (no per-file signed URL through the LLM).
+    # Stable bearer-authed transfer endpoints used by the gateway bridge's by-path
+    # upload_file/download_file (no per-file signed URL through the LLM).
     app.router.routes.append(
         Route("/files/push", files.push, methods=["POST", "PUT"])
     )

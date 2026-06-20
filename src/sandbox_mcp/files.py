@@ -171,9 +171,9 @@ def _bearer_ok(request) -> bool:
 
 
 async def push(request):
-    """Stable bearer-authed upload: the gateway POSTs file bytes here with
-    ?sandbox=&path= instead of fetching a one-time signed URL first. Lets the AI
-    call one self-contained push_file(local_path, sandbox, remote_path) tool."""
+    """Stable bearer-authed upload: a trusted client (e.g. the gateway bridge) POSTs
+    file bytes here with ?sandbox=&path= instead of fetching a one-time signed URL
+    first. Backs the bridge's by-path upload_file without a per-file signed URL."""
     if not _bearer_ok(request):
         return PlainTextResponse("unauthorized", status_code=401)
     sandbox = request.query_params.get("sandbox", "")
