@@ -54,6 +54,11 @@ def _find(name: str):
         return None
 
 
+def exists(name: str) -> bool:
+    """True if a container for this sandbox exists (running or stopped)."""
+    return _find(name) is not None
+
+
 def list_sandboxes() -> list[dict]:
     out = []
     for c in client().containers.list(all=True, filters={"label": LABEL}):
@@ -124,11 +129,14 @@ def ensure(name: str, image: str | None = None):
     return c, created
 
 
-def destroy(name: str) -> None:
+def destroy(name: str) -> bool:
+    """Remove the sandbox container if present. Returns True if one existed."""
     c = _find(name)
+    existed = c is not None
     if c:
         c.remove(force=True)
     state.remove_sandbox(name)
+    return existed
 
 
 def exec_command(name: str, command: str, timeout: int | None = None) -> dict:

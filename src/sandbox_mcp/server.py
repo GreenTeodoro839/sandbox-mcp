@@ -217,11 +217,20 @@ def create_sandbox_tool(sandbox: str = "", image: str = "") -> dict:
 def destroy_sandbox_tool(sandbox: str = "", delete_files: bool = False) -> dict:
     """Remove a sandbox container. Workspace files are kept on disk unless
     delete_files=true."""
-    sandboxes.destroy(sandbox)
+    existed = sandboxes.destroy(sandbox)
+    files_removed = False
     if delete_files:
         import shutil
 
-        shutil.rmtree(config.DATA_DIR / sandbox, ignore_errors=True)
+        d = config.DATA_DIR / sandbox
+        files_removed = d.exists()
+        shutil.rmtree(d, ignore_errors=True)
+    if not existed and not files_removed:
+        return {
+            "error": f"no sandbox named '{sandbox}' exists; nothing to delete",
+            "fix": "Call list_sandboxes() to see the real names (don't guess). If it "
+            "was already removed, no action is needed.",
+        }
     return {"name": sandbox, "destroyed": True}
 
 
@@ -275,6 +284,12 @@ def stop_job_tool(job_id: str = "") -> dict:
 @guided("sandbox")
 def list_files_tool(sandbox: str = "", path: str = ".") -> dict:
     """List files in the sandbox workspace directory."""
+    if not sandboxes.exists(sandbox):
+        return {
+            "error": f"sandbox '{sandbox}' does not exist",
+            "fix": "Call list_sandboxes() to see existing sandboxes, or create it "
+            "(exec/run_background auto-create on first use), then retry.",
+        }
     return files.list_dir(sandbox, path)
 
 
