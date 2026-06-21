@@ -1,5 +1,7 @@
 """MCP tool definitions and the combined ASGI app (/mcp + /files)."""
 
+import functools
+import inspect
 import logging
 import shlex
 import sys
@@ -21,6 +23,42 @@ def _tlog(msg: str) -> None:
     even if the MCP SDK overrides the logging configuration."""
     sys.stderr.write(f"[sandbox-mcp] {msg}\n")
     sys.stderr.flush()
+
+
+def guided(*required: str):
+    """Make a tool's failures ACTIONABLE so the model fixes its call and retries
+    instead of concluding the tool is unusable. A missing required argument (one of
+    `required`) returns a clear, named message + the tool's usage line instead of a
+    raw pydantic validation dump; a runtime exception becomes a short "adjust and
+    retry" error. Required args are given "" defaults in the signature so the SDK lets
+    the call reach here, where we own the message."""
+
+    def deco(fn):
+        name = fn.__name__.removesuffix("_tool")
+        params = ", ".join(inspect.signature(fn).parameters)
+
+        @functools.wraps(fn)
+        def wrapper(**kwargs):
+            missing = [r for r in required if kwargs.get(r) in (None, "")]
+            if missing:
+                return {
+                    "error": f"missing required argument(s): {', '.join(missing)}",
+                    "usage": f"{name}({params})",
+                    "fix": "Add the argument(s) and call again -- this is a fixable "
+                    "call, not an unavailable tool.",
+                }
+            try:
+                return fn(**kwargs)
+            except Exception as e:
+                return {
+                    "error": f"{name} failed: {type(e).__name__}: {e}",
+                    "fix": "Adjust the arguments (or retry if it looks transient) "
+                    "and call again.",
+                }
+
+        return wrapper
+
+    return deco
 
 INSTRUCTIONS = """\
 This is the user's Linux sandbox: a real shell with full command execution. It is the
@@ -115,13 +153,15 @@ mcp = FastMCP(
 # Sandbox management
 # --------------------------------------------------------------------------
 @mcp.tool(name="list_sandboxes")
+@guided()
 def list_sandboxes_tool() -> list:
     """List all sandboxes with their status, image and last-used time."""
     return sandboxes.list_sandboxes()
 
 
 @mcp.tool(name="create_sandbox")
-def create_sandbox_tool(sandbox: str, image: str = "") -> dict:
+@guided("sandbox")
+def create_sandbox_tool(sandbox: str = "", image: str = "") -> dict:
     """Create a persistent sandbox (Docker container). Usually optional, since
     exec / run_background auto-create on first use. `image` defaults to the base
     image; pass e.g. "python:3.12" for a custom one."""
@@ -130,7 +170,8 @@ def create_sandbox_tool(sandbox: str, image: str = "") -> dict:
 
 
 @mcp.tool(name="destroy_sandbox")
-def destroy_sandbox_tool(sandbox: str, delete_files: bool = False) -> dict:
+@guided("sandbox")
+def destroy_sandbox_tool(sandbox: str = "", delete_files: bool = False) -> dict:
     """Remove a sandbox container. Workspace files are kept on disk unless
     delete_files=true."""
     sandboxes.destroy(sandbox)
@@ -145,7 +186,8 @@ def destroy_sandbox_tool(sandbox: str, delete_files: bool = False) -> dict:
 # Command execution
 # --------------------------------------------------------------------------
 @mcp.tool(name="exec")
-def exec_tool(sandbox: str, command: str, timeout: int = 0) -> dict:
+@guided("sandbox", "command")
+def exec_tool(sandbox: str = "", command: str = "", timeout: int = 0) -> dict:
     """Run a shell command in the sandbox and wait for the result (auto-creates
     the sandbox). ONLY for quick commands that finish well under 30s -- the client
     connection times out around 30 seconds. For anything slower (installs, compiling,
@@ -156,7 +198,8 @@ def exec_tool(sandbox: str, command: str, timeout: int = 0) -> dict:
 
 
 @mcp.tool(name="run_background")
-def run_background_tool(sandbox: str, command: str, timeout: int = 0) -> dict:
+@guided("sandbox", "command")
+def run_background_tool(sandbox: str = "", command: str = "", timeout: int = 0) -> dict:
     """Start a long-running command in the background and return a job_id
     immediately, avoiding the ~30s client connection timeout. Use this for anything
     slow (installs, compiling, downloads, heavy processing). Poll progress with
@@ -166,7 +209,8 @@ def run_background_tool(sandbox: str, command: str, timeout: int = 0) -> dict:
 
 
 @mcp.tool(name="get_job")
-def get_job_tool(job_id: str, tail_lines: int = 200) -> dict:
+@guided("job_id")
+def get_job_tool(job_id: str = "", tail_lines: int = 200) -> dict:
     """Get a background job's status (running/finished), exit code and the last
     log lines. This call already waits up to ~15s for the job to finish before
     returning, so just call it again to keep waiting -- no need to spin rapidly.
@@ -175,7 +219,8 @@ def get_job_tool(job_id: str, tail_lines: int = 200) -> dict:
 
 
 @mcp.tool(name="stop_job")
-def stop_job_tool(job_id: str) -> dict:
+@guided("job_id")
+def stop_job_tool(job_id: str = "") -> dict:
     """Stop a running background job."""
     return jobs.stop(job_id)
 
@@ -184,27 +229,31 @@ def stop_job_tool(job_id: str) -> dict:
 # Files
 # --------------------------------------------------------------------------
 @mcp.tool(name="list_files")
-def list_files_tool(sandbox: str, path: str = ".") -> dict:
+@guided("sandbox")
+def list_files_tool(sandbox: str = "", path: str = ".") -> dict:
     """List files in the sandbox workspace directory."""
     return files.list_dir(sandbox, path)
 
 
 @mcp.tool(name="read_text")
-def read_text_tool(sandbox: str, path: str) -> dict:
+@guided("sandbox", "path")
+def read_text_tool(sandbox: str = "", path: str = "") -> dict:
     """Read a small text file inline (e.g. a script or log). For large or binary
     files use download_file instead."""
     return files.read_text(sandbox, path)
 
 
 @mcp.tool(name="write_text")
-def write_text_tool(sandbox: str, path: str, content: str) -> dict:
+@guided("sandbox", "path")
+def write_text_tool(sandbox: str = "", path: str = "", content: str = "") -> dict:
     """Write/overwrite a small text file, e.g. a script you want to run. For large
     or binary files use upload_file or fetch_url (from a public URL) instead."""
     return files.write_text(sandbox, path, content)
 
 
 @mcp.tool(name="upload_file")
-def upload_file_tool(sandbox: str, dest: str, ttl_seconds: int = 0) -> dict:
+@guided("sandbox", "dest")
+def upload_file_tool(sandbox: str = "", dest: str = "", ttl_seconds: int = 0) -> dict:
     """Bring a file INTO the sandbox workspace at `dest` (a workspace-relative path).
     Returns a one-time HTTPS URL; PUT the bytes to it out-of-band (e.g. `curl -T
     <file> '<url>'`) -- never send big files through tool arguments, they overflow
@@ -220,7 +269,8 @@ def upload_file_tool(sandbox: str, dest: str, ttl_seconds: int = 0) -> dict:
 
 
 @mcp.tool(name="download_file")
-def download_file_tool(sandbox: str, src: str, ttl_seconds: int = 0) -> dict:
+@guided("sandbox", "src")
+def download_file_tool(sandbox: str = "", src: str = "", ttl_seconds: int = 0) -> dict:
     """Get a file OUT of the sandbox workspace (`src`). Returns a one-time HTTPS
     download URL -- give it to the user to open/save. Use this for large or binary
     outputs instead of read_text."""
@@ -230,7 +280,8 @@ def download_file_tool(sandbox: str, src: str, ttl_seconds: int = 0) -> dict:
 
 
 @mcp.tool(name="fetch_url")
-def fetch_url_tool(sandbox: str, url: str, dest: str) -> dict:
+@guided("sandbox", "url", "dest")
+def fetch_url_tool(sandbox: str = "", url: str = "", dest: str = "") -> dict:
     """Make the sandbox download a PUBLIC http(s):// URL directly into its
     workspace at `dest` (server-side, full bandwidth). Use this only for files
     already hosted on the internet. To bring in a LOCAL file (not on a public URL),
