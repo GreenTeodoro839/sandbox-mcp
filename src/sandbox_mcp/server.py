@@ -8,6 +8,7 @@ import sys
 from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.routing import Route
 
@@ -48,17 +49,59 @@ def guided(*required: str):
                     "call, not an unavailable tool.",
                 }
             try:
-                return fn(**kwargs)
+                result = fn(**kwargs)
             except Exception as e:
                 return {
                     "error": f"{name} failed: {type(e).__name__}: {e}",
                     "fix": "Adjust the arguments (or retry if it looks transient) "
                     "and call again.",
                 }
+            # A tool-level error dict (e.g. "unknown job_id", "not found") gets a
+            # uniform retry hint so the model fixes the call instead of giving up.
+            if isinstance(result, dict) and result.get("error") and "fix" not in result:
+                result["fix"] = (
+                    f"Check the arguments against {name}'s usage and call it again "
+                    "-- this is usually fixable, not a dead end."
+                )
+            return result
 
         return wrapper
 
     return deco
+
+
+def _reframe(name: str, msg: str) -> str:
+    """Turn a framework-level ToolError message into actionable guidance."""
+    low = msg.lower()
+    if "unknown tool" in low:
+        return (
+            f"{msg}. Only call tools that appear in tools/list; check the exact name "
+            "and try again."
+        )
+    if "validation error" in low:
+        return (
+            f"Wrong argument type for {name}: an argument did not match the tool's "
+            "schema (e.g. a number or list where a string is expected, or vice versa). "
+            f"Check each argument's type, fix it, and call {name} again -- this is a "
+            f"fixable call, not an unavailable tool.\nDetails: {msg}"
+        )
+    return (
+        f"{msg}\nThis is usually fixable -- adjust the arguments (or retry if it looks "
+        "transient) and call the tool again."
+    )
+
+
+class GuidedFastMCP(FastMCP):
+    """Reframe framework-level tool errors (argument-type validation failures, unknown
+    tool) into actionable guidance, so a mistyped call reads as 'fixable, retry' rather
+    than a raw pydantic dump. (Missing-arg and runtime errors are handled earlier by the
+    @guided decorator, which returns a dict and never reaches here.)"""
+
+    async def call_tool(self, name: str, arguments: dict):
+        try:
+            return await super().call_tool(name, arguments)
+        except ToolError as e:
+            raise ToolError(_reframe(name, str(e))) from e
 
 INSTRUCTIONS = """\
 This is the user's Linux sandbox: a real shell with full command execution. It is the
@@ -137,7 +180,7 @@ Report results concisely; do not dump large file contents into the chat."""
 
 # The MCP transport's DNS-rebinding protection checks the Host header, which frp's
 # https2http plugin rewrites -- disable it; access is already gated by the bearer token.
-mcp = FastMCP(
+mcp = GuidedFastMCP(
     "sandbox-mcp",
     instructions=INSTRUCTIONS,
     # Stateless: no server-side MCP sessions, so a server restart or a flaky client
